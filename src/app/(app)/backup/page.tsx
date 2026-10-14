@@ -76,12 +76,12 @@ export default function BackupPage() {
         {
           name: "Relay Teams",
           rows: [
-            ["Event", "Category", "School", "Team", "Leg", "Bib", "Name"],
+            ["Event", "Category", "School", "Team", "Bib", "Name"],
             ...snap.members.map((m) => {
               const t = team.get(m.team_id);
               const ev = eventById.get(t?.event_id ?? -1);
               const a = athlete.get(m.athlete_id);
-              return [ev?.name, categoryById.get(ev?.category_id ?? -1)?.name, schoolById.get(t?.school_id ?? -1)?.name, t?.team_label, m.leg, a?.bib, a?.name];
+              return [ev?.name, categoryById.get(ev?.category_id ?? -1)?.name, schoolById.get(t?.school_id ?? -1)?.name, t?.team_label, a?.bib, a?.name];
             }),
           ],
         },

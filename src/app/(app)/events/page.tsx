@@ -33,16 +33,15 @@ export default function StartListsPage() {
             t.team_label,
             snap.members
               .filter((m) => m.team_id === t.id)
-              .sort((a, b) => a.leg - b.leg)
               .map((m) => {
                 const a = athletes.get(m.athlete_id);
-                return a ? `${m.leg}. ${a.bib ?? "—"} ${a.name}` : "";
+                return a ? `${a.bib ?? "—"} ${a.name}` : "";
               })
-              .join("   "),
+              .join(", "),
             "",
           ]);
-        rows.sort((a, b) => String(a[0]).localeCompare(String(b[0])));
-        return { event: ev, title, head: ["School", "Team", "Runners (leg, bib, name)", "Result"], rows: rows.map((r, i) => [i + 1, ...r]) };
+        rows.sort((a, b) => String(a[1]).localeCompare(String(b[1])));
+        return { event: ev, title, head: ["School", "Team", "Runners (bib, name)", "Result"], rows: rows.map((r, i) => [i + 1, ...r]) };
       }
       const rows = snap.entries
         .filter((e) => e.event_id === ev.id)

@@ -42,6 +42,8 @@ export interface Category {
   dob_from: string;
   dob_to: string | null;
   sort_order: number;
+  /** False = results don't add to the overall school championship (e.g. Super Senior). */
+  counts_for_points: boolean;
 }
 
 export interface MeetEvent {
@@ -80,8 +82,11 @@ export interface RelayTeam {
 export interface RelayMember {
   team_id: number;
   athlete_id: number;
-  leg: number;
 }
+
+/** Runners allowed in one relay team (4 run, the rest are reserves). */
+export const RELAY_MIN = 4;
+export const RELAY_MAX = 7;
 
 export interface Result {
   id: number;

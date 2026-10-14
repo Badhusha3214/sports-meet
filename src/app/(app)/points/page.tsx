@@ -62,7 +62,14 @@ export default function PointsPage() {
     <>
       <PageHeader
         title="Points Table & Results"
-        description={`Points — individual: ${settings?.points_first} / ${settings?.points_second} / ${settings?.points_third}; relay: ${settings?.relay_points_first} / ${settings?.relay_points_second} / ${settings?.relay_points_third} (1st / 2nd / 3rd). Change in Meet Setup.`}
+        description={`Points — individual: ${settings?.points_first} / ${settings?.points_second} / ${settings?.points_third}; relay: ${settings?.relay_points_first} / ${settings?.relay_points_second} / ${settings?.relay_points_third} (1st / 2nd / 3rd).${
+          categories.some((c) => !c.counts_for_points)
+            ? ` Not counted for school points: ${categories
+                .filter((c) => !c.counts_for_points)
+                .map((c) => c.name)
+                .join(", ")}.`
+            : ""
+        } Change in Meet Setup.`}
         actions={
           <ExportButtons
             onExcel={() =>

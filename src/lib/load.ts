@@ -18,7 +18,7 @@ export function loadRelayTeams() {
 
 export function loadRelayMembers() {
   return fetchAll<RelayMember>((f, t) =>
-    supabase().from("relay_members").select("*").order("team_id").order("leg").range(f, t),
+    supabase().from("relay_members").select("*").order("team_id").order("athlete_id").range(f, t),
   );
 }
 

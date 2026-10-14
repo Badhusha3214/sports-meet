@@ -178,7 +178,6 @@ export function meritCertificates(results: Result[], snap: MeetSnapshot, l: Look
       if (team)
         snap.members
           .filter((m) => m.team_id === team.id)
-          .sort((a, b) => a.leg - b.leg)
           .forEach((m) => {
             const a = athletes.get(m.athlete_id);
             if (a) people.push(a);

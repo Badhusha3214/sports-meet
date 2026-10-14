@@ -5,15 +5,15 @@ import { useMeet } from "@/components/meet-context";
 import { useToast } from "@/components/toast";
 import { Badge, Button, Card, Empty, Note, PageHeader, Table, Td } from "@/components/ui";
 import { downloadExcel, excelDate, pick, readFirstSheet } from "@/lib/excel";
-import { loadAthletes, loadRelayTeams } from "@/lib/load";
+import { loadAthletes, loadRelayMembers, loadRelayTeams } from "@/lib/load";
 import { supabase } from "@/lib/supabase/client";
-import type { Category, Gender, MeetEvent } from "@/lib/types";
+import { RELAY_MAX, RELAY_MIN, type Category, type Gender, type MeetEvent } from "@/lib/types";
 import { defaultCategory, errorMessage, fmtDate } from "@/lib/util";
 
 interface RelayPick {
   event: MeetEvent;
-  team: string;
-  leg: number | null;
+  /** Groups a school's runners into separate teams within this file (e.g. "1", "2"). */
+  group: string;
 }
 
 interface Row {
@@ -36,8 +36,8 @@ interface RelayGroup {
   key: string;
   event: MeetEvent;
   schoolId: number;
-  team: string;
-  runners: { row: Row; leg: number }[];
+  group: string;
+  runners: Row[];
   problem: string | null;
 }
 
@@ -52,34 +52,21 @@ const norm = (s: string) =>
 
 const rowKey = (name: string, schoolId: number | null, dob: string) => `${norm(name)}|${schoolId}|${dob}`;
 
-/** Groups relay runners from valid rows into teams and checks each team has 4 runners on legs 1–4. */
+/** Groups relay runners from valid rows into teams (school + relay + group) and checks the team size. */
 function buildRelayGroups(rows: Row[]): RelayGroup[] {
   const groups = new Map<string, RelayGroup>();
   for (const r of rows) {
     if (r.errors.length || !r.schoolId) continue;
     for (const p of r.relays) {
-      const key = `${r.schoolId}|${p.event.id}|${p.team}`;
-      const g = groups.get(key) ?? { key, event: p.event, schoolId: r.schoolId, team: p.team, runners: [], problem: null };
-      g.runners.push({ row: r, leg: p.leg ?? 0 });
+      const key = `${r.schoolId}|${p.event.id}|${p.group}`;
+      const g = groups.get(key) ?? { key, event: p.event, schoolId: r.schoolId, group: p.group, runners: [], problem: null };
+      g.runners.push(r);
       groups.set(key, g);
     }
   }
   for (const g of groups.values()) {
-    if (g.runners.length !== 4) {
-      g.problem = `Has ${g.runners.length} runner(s); a team needs exactly 4`;
-      continue;
-    }
-    const given = g.runners.filter((x) => x.leg).map((x) => x.leg);
-    if (new Set(given).size !== given.length) {
-      g.problem = "Two runners have the same leg number";
-      continue;
-    }
-    // Runners without a leg number fill the remaining legs in sheet order.
-    const free = [1, 2, 3, 4].filter((l) => !given.includes(l));
-    g.runners.forEach((x) => {
-      if (!x.leg) x.leg = free.shift()!;
-    });
-    g.runners.sort((a, b) => a.leg - b.leg);
+    if (g.runners.length < RELAY_MIN || g.runners.length > RELAY_MAX)
+      g.problem = `Has ${g.runners.length} runner(s); a team needs ${RELAY_MIN}–${RELAY_MAX}`;
   }
   return [...groups.values()].sort((a, b) => a.key.localeCompare(b.key));
 }
@@ -106,12 +93,13 @@ export default function ImportPage() {
       {
         name: "Athletes",
         rows: [
-          ["Player Name", "School", "DOB", "Gender", "Category", "Events", "Relay Team", "Relay Leg"],
-          ["Sample Runner 1", school, dob, "Boys", sample?.name ?? "", evText(true), "A", 1],
-          ["Sample Runner 2", school, dob, "Boys", sample?.name ?? "", evText(true), "A", 2],
-          ["Sample Runner 3", school, dob, "Boys", sample?.name ?? "", relay?.name ?? "", "A", 3],
-          ["Sample Runner 4", school, dob, "Boys", sample?.name ?? "", relay?.name ?? "", "A", 4],
-          ["Sample Sprinter", school, dob, "Boys", sample?.name ?? "", evText(false), "", ""],
+          ["Player Name", "School", "DOB", "Gender", "Category", "Events", "Relay Team"],
+          ["Sample Runner 1", school, dob, "Boys", sample?.name ?? "", evText(true), ""],
+          ["Sample Runner 2", school, dob, "Boys", sample?.name ?? "", evText(true), ""],
+          ["Sample Runner 3", school, dob, "Boys", sample?.name ?? "", relay?.name ?? "", ""],
+          ["Sample Runner 4", school, dob, "Boys", sample?.name ?? "", relay?.name ?? "", ""],
+          ["Sample Reserve 5", school, dob, "Boys", sample?.name ?? "", relay?.name ?? "", ""],
+          ["Sample Sprinter", school, dob, "Boys", sample?.name ?? "", evText(false), ""],
         ],
       },
       { name: "Schools", rows: [["School (copy exactly)"], ...schools.map((s) => [s.name])] },
@@ -135,10 +123,11 @@ export default function ImportPage() {
         name: "How to fill relays",
         rows: [
           ["Relays"],
-          ["Add the relay event to the Events column of each of the 4 runners."],
-          ["Relay Team: A, B, … (leave blank for A). Use B when a school has a second team in the same relay."],
-          ["Relay Leg: 1 to 4 (optional). Runners without a leg number fill the remaining legs in sheet order."],
-          ["Each team must have exactly 4 runners from the same school and category."],
+          ["Add the relay event to the Events column of every runner in the team."],
+          [`A team has ${RELAY_MIN} to ${RELAY_MAX} runners from the same school and category (runners beyond 4 are reserves).`],
+          ["Relay Team: leave blank when a school has one team in that relay."],
+          ["If a school has two teams in the same relay, write 1 for the first team's runners and 2 for the second's."],
+          ["Team letters (A, B, C …) are given automatically by the app — a different letter for every team in the relay."],
           ["Runners who are already registered can be listed again just to put them in a relay team."],
         ],
       },
@@ -161,8 +150,7 @@ export default function ImportPage() {
         const gender = ["boys", "boy", "male", "m"].includes(g) ? "Boys" : ["girls", "girl", "female", "f"].includes(g) ? "Girls" : "";
         const catText = String(pick(r, ["Category", "Age Category"])).trim();
         const evText = String(pick(r, ["Events", "Event", "Events Selected"])).trim();
-        const teamText = String(pick(r, ["Relay Team", "Team", "Relay"])).trim().toUpperCase();
-        const legText = String(pick(r, ["Relay Leg", "Leg"])).trim();
+        const group = String(pick(r, ["Relay Team", "Team", "Relay Group"])).trim().toUpperCase() || "1";
         const errors: string[] = [];
         const warnings: string[] = [];
 
@@ -173,14 +161,6 @@ export default function ImportPage() {
           category = defaultCategory(categories, gender as Gender, dob) ?? null;
           if (category && catText) warnings.push(`Category "${catText}" not found; using ${category.name}`);
         }
-
-        let leg: number | null = null;
-        if (legText) {
-          leg = /^[1-4]$/.test(legText) ? Number(legText) : null;
-          if (!leg) warnings.push(`Relay leg "${legText}" ignored (must be 1–4)`);
-        }
-        const team = /^[A-Z]$/.test(teamText) ? teamText : "A";
-        if (teamText && team !== teamText) warnings.push(`Relay team "${teamText}" ignored (use a single letter); using A`);
 
         const evs: MeetEvent[] = [];
         const relays: RelayPick[] = [];
@@ -193,11 +173,10 @@ export default function ImportPage() {
             if (!ev && norm(t) === "relay" && catRelays.length === 1) ev = catRelays[0];
             if (!ev) warnings.push(`"${t}" is not an event in ${category.name}`);
             else if (ev.kind === "relay") {
-              if (!relays.some((x) => x.event.id === ev.id)) relays.push({ event: ev, team, leg });
+              if (!relays.some((x) => x.event.id === ev.id)) relays.push({ event: ev, group });
             } else if (!evs.includes(ev)) evs.push(ev);
           }
         }
-        if (relays.length > 1 && leg) warnings.push("Relay leg applies to every relay listed on this row");
 
         if (!name) errors.push("Missing name");
         if (!schoolId) errors.push(schoolText ? `Unknown school "${schoolText}"` : "Missing school");
@@ -283,49 +262,61 @@ export default function ImportPage() {
       if (id && id > 0) idByRow.set(r.row, id);
     }
 
-    // 2) Relay teams.
+    // 2) Relay teams. The database gives each new team the next free letter in its relay.
     const status: Record<string, { ok: boolean; text: string }> = {};
-    const existingTeams = await loadRelayTeams();
+    const [teams, members] = await Promise.all([loadRelayTeams(), loadRelayMembers()]);
+    const teamOf = new Map<string, string>(); // `${eventId}|${athleteId}` → existing team letter
+    for (const m of members) {
+      const t = teams.find((x) => x.id === m.team_id);
+      if (t) teamOf.set(`${t.event_id}|${m.athlete_id}`, t.team_label);
+    }
     for (const g of groups) {
       tick();
       if (g.problem) {
         status[g.key] = { ok: false, text: `Not created: ${g.problem}` };
         continue;
       }
-      const missing = g.runners.filter((x) => !(idByRow.get(x.row.row)! > 0));
+      const ids = g.runners.map((r) => idByRow.get(r.row) ?? -1);
+      const missing = g.runners.filter((_, i) => !(ids[i] > 0));
       if (missing.length) {
-        status[g.key] = { ok: false, text: `Not created: ${missing.map((x) => x.row.name).join(", ")} could not be imported` };
+        status[g.key] = { ok: false, text: `Not created: ${missing.map((r) => r.name).join(", ")} could not be imported` };
         continue;
       }
-      if (existingTeams.some((t) => t.event_id === g.event.id && t.school_id === g.schoolId && t.team_label === g.team)) {
-        status[g.key] = { ok: false, text: `Team ${g.team} already exists — skipped` };
+      const already = g.runners.filter((_, i) => teamOf.has(`${g.event.id}|${ids[i]}`));
+      if (already.length) {
+        const labels = [...new Set(already.map((r) => teamOf.get(`${g.event.id}|${ids[g.runners.indexOf(r)]}`)))];
+        status[g.key] = {
+          ok: false,
+          text: `Skipped: ${already.map((r) => r.name).join(", ")} already in team ${labels.join(", ")}`,
+        };
         continue;
       }
       const { data: team, error } = await sb
         .from("relay_teams")
-        .insert({ event_id: g.event.id, school_id: g.schoolId, team_label: g.team })
-        .select("id")
+        .insert({ event_id: g.event.id, school_id: g.schoolId })
+        .select("id, team_label")
         .single();
       if (error) {
         status[g.key] = { ok: false, text: errorMessage(error) };
         continue;
       }
-      const res = await sb
-        .from("relay_members")
-        .insert(g.runners.map((x) => ({ team_id: team.id, athlete_id: idByRow.get(x.row.row), leg: x.leg })));
+      const res = await sb.from("relay_members").insert(ids.map((athlete_id) => ({ team_id: team.id, athlete_id })));
       if (res.error) {
         await sb.from("relay_teams").delete().eq("id", team.id);
         status[g.key] = { ok: false, text: errorMessage(res.error) };
-      } else status[g.key] = { ok: true, text: "Team created" };
+      } else {
+        ids.forEach((id) => teamOf.set(`${g.event.id}|${id}`, team.team_label));
+        status[g.key] = { ok: true, text: `Created as team ${team.team_label}` };
+      }
     }
 
     setRows((rs) => rs.map((r) => ({ ...r, ...(updated.get(r.row) ?? {}) })));
     setTeamStatus(status);
     setProgress(null);
     const count = (s: Row["status"]) => [...updated.values()].filter((u) => u.status === s).length;
-    const teams = Object.values(status).filter((s) => s.ok).length;
+    const created = Object.values(status).filter((s) => s.ok).length;
     toast.ok(
-      `Import finished: ${count("added")} athletes added, ${count("duplicate")} already registered, ${count("failed")} failed, ${teams} relay team(s) created.`,
+      `Import finished: ${count("added")} athletes added, ${count("duplicate")} already registered, ${count("failed")} failed, ${created} relay team(s) created.`,
     );
   };
 
@@ -335,8 +326,8 @@ export default function ImportPage() {
   const teamProblemByRow = new Map<number, string[]>();
   for (const g of groups)
     if (g.problem)
-      for (const x of g.runners)
-        teamProblemByRow.set(x.row.row, [...(teamProblemByRow.get(x.row.row) ?? []), `${g.event.name} team ${g.team} won't be created`]);
+      for (const r of g.runners) teamProblemByRow.set(r.row, [...(teamProblemByRow.get(r.row) ?? []), `${g.event.name} team won't be created`]);
+  const multiGroup = new Set(groups.map((g) => `${g.schoolId}|${g.event.id}`).filter((k, i, a) => a.indexOf(k) !== i));
 
   return (
     <>
@@ -364,10 +355,11 @@ export default function ImportPage() {
         }
       />
       <Note tone="blue">
-        Columns: <b>Player Name, School, DOB, Gender, Category, Events</b>, plus optional <b>Relay Team</b> (A, B…) and{" "}
-        <b>Relay Leg</b> (1–4). Separate several events with commas. For a relay, list the relay event (e.g. <b>4×100m Relay</b>) for
-        each of its 4 runners. DOB may be an Excel date, <b>2014-05-12</b> or <b>12-05-2014</b>. If Category is blank it is chosen from
-        gender and DOB. The template includes the exact names{settings?.meet_name ? ` for ${settings.meet_name}` : ""}.
+        Columns: <b>Player Name, School, DOB, Gender, Category, Events</b>, plus optional <b>Relay Team</b>. Separate several events with
+        commas. For a relay, list the relay event (e.g. <b>4×100m Relay</b>) for each of the team&apos;s {RELAY_MIN}–{RELAY_MAX} runners. Use{" "}
+        <b>Relay Team</b> = 1, 2 only when a school has two teams in the same relay — team letters are given automatically. DOB may be an
+        Excel date, <b>2014-05-12</b> or <b>12-05-2014</b>. If Category is blank it is chosen from gender and DOB. The template includes the
+        exact names{settings?.meet_name ? ` for ${settings.meet_name}` : ""}.
       </Note>
 
       {!rows.length ? (
@@ -419,8 +411,8 @@ export default function ImportPage() {
                   <Td className="whitespace-nowrap text-xs">
                     {r.relays.map((p) => (
                       <div key={p.event.id}>
-                        {p.event.name} · Team {p.team}
-                        {p.leg ? ` · Leg ${p.leg}` : ""}
+                        {p.event.name}
+                        {multiGroup.has(`${r.schoolId}|${p.event.id}`) && ` · team ${p.group}`}
                       </div>
                     ))}
                   </Td>
@@ -445,7 +437,7 @@ export default function ImportPage() {
           {!!groups.length && (
             <Card>
               <h2 className="mb-3 font-bold">Relay teams in this file ({groups.length})</h2>
-              <Table head={["Relay", "School", "Team", "Runners (leg · name)", "Status"]}>
+              <Table head={["Relay", "School", "Runners", "Status"]}>
                 {groups.map((g) => {
                   const done = teamStatus[g.key];
                   return (
@@ -454,15 +446,13 @@ export default function ImportPage() {
                         <div className="font-semibold">{g.event.name}</div>
                         {categoryById.get(g.event.category_id)?.name}
                       </Td>
-                      <Td className="text-xs">{schoolById.get(g.schoolId)?.name}</Td>
-                      <Td className="font-bold">{g.team}</Td>
                       <Td className="text-xs">
-                        {g.runners.map((x) => (
-                          <div key={x.row.row}>
-                            {x.leg ? `${x.leg} · ` : ""}
-                            {x.row.name}
-                          </div>
-                        ))}
+                        {schoolById.get(g.schoolId)?.name}
+                        {multiGroup.has(`${g.schoolId}|${g.event.id}`) && <div className="text-slate-500">file team {g.group}</div>}
+                      </Td>
+                      <Td className="text-xs">
+                        {g.runners.map((r) => r.name).join(", ")}
+                        <div className="text-slate-500">{g.runners.length} runner(s)</div>
                       </Td>
                       <Td className="text-xs">
                         {done ? (
@@ -470,7 +460,7 @@ export default function ImportPage() {
                         ) : g.problem ? (
                           <span className="text-red-700">⚠ {g.problem}</span>
                         ) : (
-                          <span className="text-emerald-700">✓ Ready</span>
+                          <span className="text-emerald-700">✓ Ready — letter given on import</span>
                         )}
                       </Td>
                     </tr>

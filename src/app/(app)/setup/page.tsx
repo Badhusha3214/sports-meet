@@ -203,7 +203,7 @@ export default function SetupPage() {
             An athlete is eligible if born on or after <b>Born from</b> (and on or before <b>Born to</b>, if set). Registration picks the
             youngest eligible category automatically.
           </p>
-          <Table head={["Name", "Gender", "Born from", "Born to (optional)", "Order", ""]}>
+          <Table head={["Name", "Gender", "Born from", "Born to (optional)", "Order", "Counts for overall points", ""]}>
             {categories.map((c) => (
               <tr key={c.id}>
                 <Td>
@@ -223,6 +223,15 @@ export default function SetupPage() {
                 </Td>
                 <Td className="w-20">
                   <Cell type="number" value={c.sort_order} onSave={(v) => update("categories", c.id, { sort_order: Number(v) || 0 })} />
+                </Td>
+                <Td className="w-28 text-center">
+                  <input
+                    type="checkbox"
+                    className="h-5 w-5"
+                    checked={c.counts_for_points}
+                    title="Untick to leave this category out of the school championship points"
+                    onChange={(e) => update("categories", c.id, { counts_for_points: e.target.checked })}
+                  />
                 </Td>
                 <Td className="w-20">
                   <Button size="sm" variant="ghost" className="text-red-600" onClick={() => remove("categories", c.id, `${c.name} and all its events`)}>

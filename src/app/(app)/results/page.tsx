@@ -61,7 +61,6 @@ export default function PrizeEntryPage() {
         .map((t) => {
           const names = snap.members
             .filter((m) => m.team_id === t.id)
-            .sort((a, b) => a.leg - b.leg)
             .map((m) => athletes.get(m.athlete_id))
             .map((a) => (a ? `${a.bib ?? "—"} ${a.name}` : ""))
             .join(", ");

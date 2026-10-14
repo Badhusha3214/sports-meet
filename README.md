@@ -22,8 +22,10 @@ permissions) are enforced in the database, so they hold no matter which screen o
 
 1. **Meet Setup** — meet name, date, venue, signatory names (printed on certificates), points.
 2. **Athletes** — register one by one, or **Excel Import** (download the template first). The same sheet can create
-   relay teams: list the relay in each runner's Events, plus optional **Relay Team** (A, B…) and **Relay Leg** (1–4).
-3. **Relay Teams** — check imported teams, or add teams by hand (4 runners per team).
+   relay teams: list the relay in each runner's Events (4–7 runners per team). Use the optional **Relay Team** column
+   (1, 2) only when a school has two teams in the same relay.
+3. **Relay Teams** — check imported teams, or add teams by hand. Every team in a relay gets its own letter (A, B, C…)
+   automatically; runners can be added or removed later (4–7 per team).
 4. **Bib Numbers** — allocate, then **Finalize**. Print bib cards (PDF).
 5. **Start Lists** — print/export per event for officials.
 6. **Prize Entry** — pick event → tap 🥇/🥈/🥉. Optional time/distance.
