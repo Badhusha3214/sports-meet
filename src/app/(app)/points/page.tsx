@@ -6,6 +6,7 @@ import {
   buildStandings,
   ChampionCard,
   championsOf,
+  groupCategories,
   StandingTable,
   ViewChips,
   type AthleteScore,
@@ -28,7 +29,10 @@ const standingRows = (st: Standing[]) => st.map((s, i) => [i + 1, s.school, s.go
 export default function PointsPage() {
   const { events, categories, schools, schoolById, eventById, settings, ready } = useMeet();
   const [view, setView] = useState<StandingsView>("overall");
-  const selected = typeof view === "number" ? categories.find((c) => c.id === view) ?? null : null;
+  // Girls' and boys' categories of an age group are shown together (e.g. KIDDIES).
+  const groups = useMemo(() => groupCategories(categories), [categories]);
+  const selected = groups.find((g) => g.key === view) ?? null;
+  const selectedIds = selected?.categories.map((c) => c.id) ?? null;
   const { data: snap, loading } = useLive(loadSnapshot, EMPTY_SNAPSHOT, SNAPSHOT_TABLES);
   const { data: catPoints } = useLive(
     async () => ((await supabase().rpc("school_category_points")).data as CategoryPoints[]) ?? [],
@@ -37,7 +41,8 @@ export default function PointsPage() {
   );
 
   const standings = useMemo(
-    () => buildStandings(schools, categories, catPoints, selected?.id ?? null),
+    () => buildStandings(schools, categories, catPoints, selectedIds),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [schools, categories, catPoints, selected],
   );
 
@@ -108,9 +113,10 @@ export default function PointsPage() {
       });
   }, [snap, events, categories, schoolById]);
 
-  const shownResults = allResults.filter((r) => !selected || r.categoryId === selected.id).map((r) => r.row);
+  const shownResults = allResults.filter((r) => !selectedIds || selectedIds.includes(r.categoryId)).map((r) => r.row);
   const excluded = categories.filter((c) => !c.counts_for_points);
-  const resultCount = (catId: number) => allResults.filter((r) => r.categoryId === catId).length;
+  const resultCount = (g: { categories: { id: number }[] }) =>
+    allResults.filter((r) => g.categories.some((c) => c.id === r.categoryId)).length;
 
   const championRows = (): Cell[][] =>
     categories.flatMap((c) => {
@@ -131,9 +137,9 @@ export default function PointsPage() {
   // Exports always include overall, every category, the individual champions and all results.
   const exportSections = () => [
     { title: "Overall", rows: standingRows(buildStandings(schools, categories, catPoints, null)) },
-    ...categories.map((c) => ({
-      title: c.counts_for_points ? c.name : `${c.name} (not in overall)`,
-      rows: standingRows(buildStandings(schools, categories, catPoints, c.id)),
+    ...groups.map((g) => ({
+      title: g.counts_for_points ? g.name : `${g.name} (not in overall)`,
+      rows: standingRows(buildStandings(schools, categories, catPoints, g.categories.map((c) => c.id))),
     })),
   ];
 
@@ -171,34 +177,44 @@ export default function PointsPage() {
         }
       />
 
-      <ViewChips categories={categories} view={view} onChange={setView} count={resultCount} />
+      <ViewChips groups={groups} view={view} onChange={setView} count={resultCount} />
 
       {view === "individual" ? (
         <>
           <p className="mb-3 text-sm text-slate-600">
-            Best athlete in each category from individual events (relays not included): {settings?.points_first} / {settings?.points_second} /{" "}
-            {settings?.points_third} points for 1st / 2nd / 3rd. Ties go to more golds, then silvers, then bronzes; otherwise joint champions.
+            Best girl and best boy in each age group from individual events (relays not included): {settings?.points_first} /{" "}
+            {settings?.points_second} / {settings?.points_third} points for 1st / 2nd / 3rd. Ties go to more golds, then silvers, then
+            bronzes; otherwise joint champions.
           </p>
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {categories.map((c) => (
-              <ChampionCard key={c.id} category={c} scores={athleteScores} top={4} />
+          <div className="space-y-5">
+            {groups.map((g) => (
+              <section key={g.key}>
+                <h2 className="mb-2 text-lg font-bold text-[#123b68]">{g.name}</h2>
+                <div className="grid gap-4 md:grid-cols-2">
+                  {g.categories.map((c) => (
+                    <ChampionCard key={c.id} category={c} scores={athleteScores} top={4} />
+                  ))}
+                </div>
+              </section>
             ))}
           </div>
         </>
       ) : (
         <div className="space-y-4">
           {selected && (
-            <div className="max-w-xl">
-              <ChampionCard category={selected} scores={athleteScores} top={6} />
+            <div className="grid gap-4 md:grid-cols-2">
+              {selected.categories.map((c) => (
+                <ChampionCard key={c.id} category={c} scores={athleteScores} top={6} />
+              ))}
             </div>
           )}
           <Card>
             <h2 className="text-lg font-bold">{selected ? `🏅 ${selected.name} — schools` : "🏆 Overall championship"}</h2>
             <p className="mb-3 text-xs text-slate-500">
               {selected
-                ? selected.counts_for_points
-                  ? "Points from this category only."
-                  : "Points from this category only — this category is not added to the overall total."
+                ? `${selected.categories.map((c) => c.name).join(" + ")} added together.${
+                    selected.counts_for_points ? "" : " Not added to the overall total."
+                  }`
                 : excluded.length
                   ? `All categories except ${excluded.map((c) => c.name).join(", ")}.`
                   : "All categories added together."}
@@ -211,14 +227,14 @@ export default function PointsPage() {
               Results — {selected ? selected.name : "Overall"} ({shownResults.length})
             </h2>
             {!shownResults.length ? (
-              <Empty>No results entered{selected ? " in this category" : ""} yet.</Empty>
+              <Empty>No results entered{selected ? " in this age group" : ""} yet.</Empty>
             ) : (
               <div className="max-h-[70vh] overflow-y-auto">
-                <Table head={selected ? RESULTS_HEAD.slice(1) : RESULTS_HEAD}>
+                <Table head={RESULTS_HEAD}>
                   {shownResults.map((r, i) => (
                     <tr key={i}>
-                      {(selected ? r.slice(1) : r).map((c, j) => (
-                        <Td key={j} className={(selected ? j + 1 : j) === 4 ? "font-semibold" : "text-xs"}>
+                      {r.map((c, j) => (
+                        <Td key={j} className={j === 4 ? "font-semibold" : "text-xs"}>
                           {c}
                         </Td>
                       ))}

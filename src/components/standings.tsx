@@ -39,17 +39,44 @@ interface CategoryLike {
 
 export const byMedals = (a: Medals, b: Medals) => b.points - a.points || b.gold - a.gold || b.silver - a.silver || b.bronze - a.bronze;
 
+/** An age group with its girls' and boys' categories, e.g. KIDDIES = KIDDIES - GIRLS + KIDDIES - BOYS. */
+export interface CategoryGroup {
+  key: string;
+  name: string;
+  categories: CategoryLike[];
+  /** True when at least one of its categories counts for the overall total. */
+  counts_for_points: boolean;
+}
+
+/** "SUB JUNIOR - BOYS" → "SUB JUNIOR". Categories without a " - GIRLS/BOYS" suffix stay as they are. */
+export function ageGroupName(name: string): string {
+  return name.replace(/\s*-\s*(GIRLS|BOYS)\s*$/i, "").trim();
+}
+
+/** Groups girls' and boys' categories of the same age group, keeping the categories' order. */
+export function groupCategories(categories: CategoryLike[]): CategoryGroup[] {
+  const groups = new Map<string, CategoryGroup>();
+  for (const c of categories) {
+    const name = ageGroupName(c.name);
+    const g = groups.get(name) ?? { key: name, name, categories: [], counts_for_points: false };
+    g.categories.push(c);
+    g.counts_for_points ||= c.counts_for_points;
+    groups.set(name, g);
+  }
+  return [...groups.values()];
+}
+
 /**
  * One row per school, ranked by points, then golds, silvers, bronzes.
- * Overall (categoryId = null) adds up only the categories that count; otherwise just that category.
+ * Overall (categoryIds = null) adds up only the categories that count; otherwise just the given categories.
  */
 export function buildStandings(
   schools: { id: number; name: string }[],
   categories: CategoryLike[],
   rows: CategoryPoints[],
-  categoryId: number | null,
+  categoryIds: number[] | null,
 ): Standing[] {
-  const counted = new Set(categoryId !== null ? [categoryId] : categories.filter((c) => c.counts_for_points).map((c) => c.id));
+  const counted = new Set(categoryIds ?? categories.filter((c) => c.counts_for_points).map((c) => c.id));
   return schools
     .map((s) => {
       const mine = rows.filter((r) => r.school_id === s.id && counted.has(r.category_id));
@@ -124,19 +151,19 @@ export function ChampionCard({ category, scores, top }: { category: CategoryLike
   );
 }
 
-/** Overall / Individual Champions / one chip per category. */
-export type StandingsView = "overall" | "individual" | number;
+/** Overall / Individual Champions / one chip per age group (girls and boys together). */
+export type StandingsView = "overall" | "individual" | string;
 
 export function ViewChips({
-  categories,
+  groups,
   view,
   onChange,
   count,
 }: {
-  categories: CategoryLike[];
+  groups: CategoryGroup[];
   view: StandingsView;
   onChange: (v: StandingsView) => void;
-  count?: (categoryId: number) => number;
+  count?: (group: CategoryGroup) => number;
 }) {
   const chip = (active: boolean, muted = false) =>
     cx(
@@ -152,10 +179,10 @@ export function ViewChips({
       <button onClick={() => onChange("individual")} className={cx(chip(view === "individual"), "font-bold")}>
         🏃 Individual Champions
       </button>
-      {categories.map((c) => (
-        <button key={c.id} onClick={() => onChange(c.id)} className={chip(view === c.id, !c.counts_for_points)}>
-          {c.name}
-          {count && <span className={cx("ml-1.5 text-xs", view === c.id ? "text-blue-100" : "text-slate-400")}>{count(c.id)}</span>}
+      {groups.map((g) => (
+        <button key={g.key} onClick={() => onChange(g.key)} className={chip(view === g.key, !g.counts_for_points)}>
+          {g.name}
+          {count && <span className={cx("ml-1.5 text-xs", view === g.key ? "text-blue-100" : "text-slate-400")}>{count(g)}</span>}
         </button>
       ))}
     </div>

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   buildStandings,
   ChampionCard,
+  groupCategories,
   StandingTable,
   ViewChips,
   type AthleteScore,
@@ -103,30 +104,30 @@ export default function LivePage() {
     return () => clearInterval(t);
   }, []);
 
-  const selected = typeof view === "number" ? categories.find((c) => c.id === view) ?? null : null;
+  // Girls' and boys' categories of an age group are shown together (e.g. KIDDIES).
+  const groups = useMemo(() => groupCategories(categories), [categories]);
+  const selected = groups.find((g) => g.key === view) ?? null;
   const standings = useMemo(
-    () => buildStandings(schools, categories, catPoints, selected?.id ?? null),
+    () => buildStandings(schools, categories, catPoints, selected ? selected.categories.map((c) => c.id) : null),
     [schools, categories, catPoints, selected],
   );
   const excluded = categories.filter((c) => !c.counts_for_points);
 
-  // Results grouped category → event, limited to the chosen category.
+  // Results grouped category → event, limited to the chosen age group.
   const byCategory = new Map<string, Map<string, PublicResult[]>>();
   for (const r of results) {
-    if (selected && r.category !== selected.name) continue;
+    if (selected && !selected.categories.some((c) => c.name === r.category)) continue;
     const cat = byCategory.get(r.category) ?? new Map<string, PublicResult[]>();
     cat.set(r.event, [...(cat.get(r.event) ?? []), r]);
     byCategory.set(r.category, cat);
   }
-  const resultCount = (catId: number) => {
-    const name = categories.find((c) => c.id === catId)?.name;
-    return results.filter((r) => r.category === name).length;
-  };
+  const resultCount = (g: { categories: { name: string }[] }) =>
+    results.filter((r) => g.categories.some((c) => c.name === r.category)).length;
 
   const resultsSection = (
     <section className="space-y-4">
       {!byCategory.size && (
-        <p className="rounded-xl bg-white p-8 text-center text-slate-500">No results{selected ? " in this category" : ""} yet.</p>
+        <p className="rounded-xl bg-white p-8 text-center text-slate-500">No results{selected ? " in this age group" : ""} yet.</p>
       )}
       {[...byCategory].map(([cat, evs]) => (
         <div key={cat} className="rounded-xl bg-white p-4 shadow-sm">
@@ -168,34 +169,43 @@ export default function LivePage() {
           <p className="rounded-xl bg-white p-8 text-center text-slate-600">Results are not public yet.</p>
         ) : (
           <>
-            <ViewChips categories={categories} view={view} onChange={setView} count={resultCount} />
+            <ViewChips groups={groups} view={view} onChange={setView} count={resultCount} />
 
             {view === "individual" ? (
               <>
                 <p className="mb-3 text-sm text-slate-600">
-                  Best athlete in each category from individual events (relays not included). Ties go to more golds, then silvers, then
-                  bronzes; otherwise joint champions.
+                  Best girl and best boy in each age group from individual events (relays not included). Ties go to more golds, then
+                  silvers, then bronzes; otherwise joint champions.
                 </p>
-                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                  {categories.map((c) => (
-                    <ChampionCard key={c.id} category={c} scores={scores} top={4} />
+                <div className="space-y-5">
+                  {groups.map((g) => (
+                    <section key={g.key}>
+                      <h2 className="mb-2 text-lg font-bold text-[#123b68]">{g.name}</h2>
+                      <div className="grid gap-4 md:grid-cols-2">
+                        {g.categories.map((c) => (
+                          <ChampionCard key={c.id} category={c} scores={scores} top={4} />
+                        ))}
+                      </div>
+                    </section>
                   ))}
                 </div>
               </>
             ) : (
               <div className="space-y-4">
                 {selected && (
-                  <div className="max-w-xl">
-                    <ChampionCard category={selected} scores={scores} top={6} />
+                  <div className="grid gap-4 md:grid-cols-2">
+                    {selected.categories.map((c) => (
+                      <ChampionCard key={c.id} category={c} scores={scores} top={6} />
+                    ))}
                   </div>
                 )}
                 <section className="rounded-xl bg-white p-4 shadow-sm">
                   <h2 className="text-lg font-bold">{selected ? `🏅 ${selected.name} — schools` : "🏆 Championship points"}</h2>
                   <p className="mb-3 text-xs text-slate-500">
                     {selected
-                      ? selected.counts_for_points
-                        ? "Points from this category only."
-                        : "Points from this category only — not added to the overall total."
+                      ? `${selected.categories.map((c) => c.name).join(" + ")} added together.${
+                          selected.counts_for_points ? "" : " Not added to the overall total."
+                        }`
                       : excluded.length
                         ? `All categories except ${excluded.map((c) => c.name).join(", ")}.`
                         : "All categories added together."}
