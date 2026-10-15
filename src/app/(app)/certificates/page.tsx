@@ -11,6 +11,7 @@ import {
   meritCertificates,
   participationCertificates,
   safeFileName,
+  withNumbers,
   type KeyedCertificate,
 } from "@/lib/certificate";
 import { EMPTY_SNAPSHOT, loadSnapshot, SNAPSHOT_TABLES } from "@/lib/load";
@@ -36,11 +37,24 @@ export default function CertificatesPage() {
     return participationCertificates(snap, meet).sort((a, b) => a.school.localeCompare(b.school) || a.name.localeCompare(b.name));
   }, [tab, snap, meet]);
 
+  // Certificate numbers (W…/P…-check), computed once per list so they can be shown and searched.
+  const [numbers, setNumbers] = useState<Record<string, string>>({});
+  useEffect(() => {
+    let cancelled = false;
+    void withNumbers(all, settings?.cert_salt).then((cs) => {
+      if (!cancelled) setNumbers(Object.fromEntries(cs.map((c) => [c.key, c.number ?? ""])));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [all, settings?.cert_salt]);
+
+  const needle = q.trim().toLowerCase();
   const list = all.filter(
     (c) =>
       (!schoolId || String(c.schoolId) === schoolId) &&
       (!categoryName || c.category === categoryName) &&
-      (!q.trim() || `${c.name} ${c.event} ${c.bib ?? ""}`.toLowerCase().includes(q.trim().toLowerCase())),
+      (!needle || `${c.name} ${c.event} ${c.bib ?? ""} ${numbers[c.key] ?? ""}`.toLowerCase().includes(needle)),
   );
 
   const preview = list.find((c) => c.key === previewKey) ?? list[0] ?? null;
@@ -51,16 +65,29 @@ export default function CertificatesPage() {
       setPreviewUrl(null);
       return;
     }
-    const url = certificatePreviewUrl(preview, settings);
-    setPreviewUrl(url);
-    return () => URL.revokeObjectURL(url);
+    let url: string | null = null;
+    let cancelled = false;
+    certificatePreviewUrl(preview, settings)
+      .then((u) => {
+        if (cancelled) URL.revokeObjectURL(u);
+        else setPreviewUrl((url = u));
+      })
+      .catch((e) => toast.error(e));
+    return () => {
+      cancelled = true;
+      if (url) URL.revokeObjectURL(url);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [preview?.key, preview?.performance, preview?.position, preview?.event, settings]);
 
-  const download = (certs: KeyedCertificate[], label: string) => {
+  const download = async (certs: KeyedCertificate[], label: string) => {
     if (!certs.length) return toast.error("Nothing to download.");
-    downloadCertificates(certs, settings, `${tab === "merit" ? "Merit" : "Participation"}_Certificates_${safeFileName(label)}`);
-    toast.ok(`${certs.length} certificate(s) downloaded.`);
+    try {
+      await downloadCertificates(certs, settings, `${tab === "merit" ? "Merit" : "Participation"}_Certificates_${safeFileName(label)}`);
+      toast.ok(`${certs.length} certificate(s) downloaded.`);
+    } catch (e) {
+      toast.error(e);
+    }
   };
 
   if (!ready || loading) return <Loading />;
@@ -110,7 +137,7 @@ export default function CertificatesPage() {
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <Card>
           <div className="mb-3 grid gap-2 sm:grid-cols-3">
-            <input className={inputCls} placeholder="Search name, event, bib" value={q} onChange={(e) => setQ(e.target.value)} />
+            <input className={inputCls} placeholder="Search name, event, bib or certificate no." value={q} onChange={(e) => setQ(e.target.value)} />
             <select className={inputCls} value={schoolId} onChange={(e) => setSchoolId(e.target.value)}>
               <option value="">All schools</option>
               {schools.map((s) => (
@@ -146,6 +173,7 @@ export default function CertificatesPage() {
                         {c.name} {isNew(c) && <Badge tone="green">NEW</Badge>}
                       </div>
                       <div className="text-xs text-slate-500">{c.school}</div>
+                      {numbers[c.key] && <div className="font-mono text-[11px] text-slate-400">No. {numbers[c.key]}</div>}
                     </Td>
                     <Td>
                       <div className="line-clamp-2">{c.event}</div>

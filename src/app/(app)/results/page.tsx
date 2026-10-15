@@ -141,7 +141,7 @@ export default function PrizeEntryPage() {
   const certificateFor = (rs: Result[], label: string) => {
     const certs = meritCertificates(rs, snap, meet);
     if (!certs.length) return toast.error("No winners to print yet.");
-    downloadCertificates(certs, settings, `Certificates_${safeFileName(label)}`);
+    downloadCertificates(certs, settings, `Certificates_${safeFileName(label)}`).catch((e) => toast.error(e));
   };
 
   if (!ready || loading) return <Loading />;

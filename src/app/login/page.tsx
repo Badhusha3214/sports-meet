@@ -43,9 +43,14 @@ function LoginForm() {
       <Button type="submit" size="lg" className="w-full" disabled={busy}>
         {busy ? "Signing in…" : "Sign in"}
       </Button>
-      <a href="/live" className="block text-center text-sm text-blue-700 hover:underline">
-        View public results →
-      </a>
+      <div className="flex justify-center gap-4 text-sm">
+        <a href="/live" className="text-blue-700 hover:underline">
+          Public results →
+        </a>
+        <a href="/verify" className="text-blue-700 hover:underline">
+          Verify a certificate →
+        </a>
+      </div>
     </form>
   );
 }

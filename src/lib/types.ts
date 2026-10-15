@@ -27,6 +27,8 @@ export interface Settings {
   relay_points_second: number;
   relay_points_third: number;
   public_results: boolean;
+  /** Secret used for certificate number check codes (staff-only). */
+  cert_salt?: string;
 }
 
 export interface School {

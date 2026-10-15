@@ -1,6 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import {
+  buildStandings,
+  ChampionCard,
+  StandingTable,
+  ViewChips,
+  type AthleteScore,
+  type CategoryPoints,
+  type StandingsView,
+} from "@/components/standings";
 import { supabase } from "@/lib/supabase/client";
 import type { EventKind, PointsRow } from "@/lib/types";
 import { fmtDate, POSITION_LABEL } from "@/lib/util";
@@ -24,21 +33,68 @@ interface MeetInfo {
   public_results: boolean;
 }
 
+interface PublicCategory {
+  id: number;
+  name: string;
+  sort_order: number;
+  counts_for_points: boolean;
+}
+
+interface PublicScore {
+  athlete_id: number;
+  category_id: number;
+  name: string;
+  bib: number | null;
+  school: string;
+  gold: number;
+  silver: number;
+  bronze: number;
+  points: number;
+  wins: string | null;
+}
+
 const MEDAL = { 1: "🥇", 2: "🥈", 3: "🥉" } as Record<number, string>;
 
-/** Public, read-only scoreboard. Refreshes every 20 seconds. */
+/** Public, read-only scoreboard (same views as the staff Points Table). Refreshes every 20 seconds. */
 export default function LivePage() {
   const [info, setInfo] = useState<MeetInfo | null>(null);
-  const [points, setPoints] = useState<PointsRow[]>([]);
+  const [schools, setSchools] = useState<{ id: number; name: string }[]>([]);
+  const [categories, setCategories] = useState<PublicCategory[]>([]);
+  const [catPoints, setCatPoints] = useState<CategoryPoints[]>([]);
+  const [scores, setScores] = useState<AthleteScore[]>([]);
   const [results, setResults] = useState<PublicResult[]>([]);
   const [updated, setUpdated] = useState<Date | null>(null);
+  const [view, setView] = useState<StandingsView>("overall");
 
   useEffect(() => {
     const load = async () => {
       const sb = supabase();
-      const [i, p, r] = await Promise.all([sb.rpc("public_meet_info"), sb.rpc("school_points"), sb.rpc("public_results")]);
+      const [i, p, cp, c, sc, r] = await Promise.all([
+        sb.rpc("public_meet_info"),
+        sb.rpc("school_points"),
+        sb.rpc("school_category_points"),
+        sb.rpc("public_categories"),
+        sb.rpc("public_individual_scores"),
+        sb.rpc("public_results"),
+      ]);
       setInfo(((i.data as MeetInfo[] | null) ?? [])[0] ?? null);
-      setPoints((p.data as PointsRow[]) ?? []);
+      setSchools(((p.data as PointsRow[] | null) ?? []).map((x) => ({ id: x.school_id, name: x.school })));
+      setCatPoints((cp.data as CategoryPoints[]) ?? []);
+      setCategories((c.data as PublicCategory[]) ?? []);
+      setScores(
+        ((sc.data as PublicScore[] | null) ?? []).map((x) => ({
+          athleteId: x.athlete_id,
+          name: x.name,
+          bib: x.bib,
+          school: x.school,
+          categoryId: x.category_id,
+          gold: x.gold,
+          silver: x.silver,
+          bronze: x.bronze,
+          points: x.points,
+          wins: x.wins ? x.wins.split(" · ") : [],
+        })),
+      );
       setResults((r.data as PublicResult[]) ?? []);
       setUpdated(new Date());
     };
@@ -47,76 +103,109 @@ export default function LivePage() {
     return () => clearInterval(t);
   }, []);
 
+  const selected = typeof view === "number" ? categories.find((c) => c.id === view) ?? null : null;
+  const standings = useMemo(
+    () => buildStandings(schools, categories, catPoints, selected?.id ?? null),
+    [schools, categories, catPoints, selected],
+  );
+  const excluded = categories.filter((c) => !c.counts_for_points);
+
+  // Results grouped category → event, limited to the chosen category.
   const byCategory = new Map<string, Map<string, PublicResult[]>>();
   for (const r of results) {
+    if (selected && r.category !== selected.name) continue;
     const cat = byCategory.get(r.category) ?? new Map<string, PublicResult[]>();
     cat.set(r.event, [...(cat.get(r.event) ?? []), r]);
     byCategory.set(r.category, cat);
   }
+  const resultCount = (catId: number) => {
+    const name = categories.find((c) => c.id === catId)?.name;
+    return results.filter((r) => r.category === name).length;
+  };
+
+  const resultsSection = (
+    <section className="space-y-4">
+      {!byCategory.size && (
+        <p className="rounded-xl bg-white p-8 text-center text-slate-500">No results{selected ? " in this category" : ""} yet.</p>
+      )}
+      {[...byCategory].map(([cat, evs]) => (
+        <div key={cat} className="rounded-xl bg-white p-4 shadow-sm">
+          <h2 className="mb-2 font-bold text-[#123b68]">{cat}</h2>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {[...evs].map(([ev, rows]) => (
+              <div key={ev} className="rounded-lg border border-slate-200 p-3">
+                <div className="mb-1 text-sm font-semibold">{ev}</div>
+                {rows.map((r) => (
+                  <div key={r.position} className="flex items-baseline gap-2 py-0.5 text-sm">
+                    <span>{MEDAL[r.position] ?? POSITION_LABEL[r.position]}</span>
+                    <span className="font-medium">{r.competitor}</span>
+                    <span className="truncate text-xs text-slate-500">{r.school}</span>
+                    {r.performance && <span className="ml-auto text-xs font-semibold">{r.performance}</span>}
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </section>
+  );
 
   return (
     <div className="min-h-screen bg-slate-100">
       <header className="bg-[#123b68] px-4 py-6 text-center text-white">
         <h1 className="text-2xl font-bold sm:text-3xl">{info?.meet_name || "Interschool Sports Meet"}</h1>
         <p className="text-blue-100">{[info?.venue, fmtDate(info?.meet_date)].filter(Boolean).join(" • ")}</p>
-        <p className="mt-1 text-xs text-blue-200">Live results{updated && ` • updated ${updated.toLocaleTimeString()}`}</p>
+        <p className="mt-1 text-xs text-blue-200">
+          Live results{updated && ` • updated ${updated.toLocaleTimeString()}`} •{" "}
+          <a href="/verify" className="underline">
+            Verify a certificate
+          </a>
+        </p>
       </header>
       <main className="mx-auto max-w-6xl p-4">
         {info && !info.public_results ? (
           <p className="rounded-xl bg-white p-8 text-center text-slate-600">Results are not public yet.</p>
         ) : (
-          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)]">
-            <section className="rounded-xl bg-white p-4 shadow-sm">
-              <h2 className="mb-3 text-lg font-bold">🏆 Championship points</h2>
-              <table className="w-full text-sm">
-                <thead className="text-left text-xs uppercase text-slate-500">
-                  <tr>
-                    <th className="py-1">#</th>
-                    <th>School</th>
-                    <th className="text-center">🥇</th>
-                    <th className="text-center">🥈</th>
-                    <th className="text-center">🥉</th>
-                    <th className="text-right">Pts</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {points.map((p, i) => (
-                    <tr key={p.school_id} className="border-t border-slate-100">
-                      <td className="py-2 font-bold text-slate-500">{i + 1}</td>
-                      <td className="pr-2 font-medium">{p.school}</td>
-                      <td className="text-center">{p.gold}</td>
-                      <td className="text-center">{p.silver}</td>
-                      <td className="text-center">{p.bronze}</td>
-                      <td className="text-right text-base font-bold text-blue-800">{p.points}</td>
-                    </tr>
+          <>
+            <ViewChips categories={categories} view={view} onChange={setView} count={resultCount} />
+
+            {view === "individual" ? (
+              <>
+                <p className="mb-3 text-sm text-slate-600">
+                  Best athlete in each category from individual events (relays not included). Ties go to more golds, then silvers, then
+                  bronzes; otherwise joint champions.
+                </p>
+                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                  {categories.map((c) => (
+                    <ChampionCard key={c.id} category={c} scores={scores} top={4} />
                   ))}
-                </tbody>
-              </table>
-            </section>
-            <section className="space-y-4">
-              {!results.length && <p className="rounded-xl bg-white p-8 text-center text-slate-500">No results yet.</p>}
-              {[...byCategory].map(([cat, evs]) => (
-                <div key={cat} className="rounded-xl bg-white p-4 shadow-sm">
-                  <h2 className="mb-2 font-bold text-[#123b68]">{cat}</h2>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    {[...evs].map(([ev, rows]) => (
-                      <div key={ev} className="rounded-lg border border-slate-200 p-3">
-                        <div className="mb-1 text-sm font-semibold">{ev}</div>
-                        {rows.map((r) => (
-                          <div key={r.position} className="flex items-baseline gap-2 py-0.5 text-sm">
-                            <span>{MEDAL[r.position] ?? POSITION_LABEL[r.position]}</span>
-                            <span className="font-medium">{r.competitor}</span>
-                            <span className="truncate text-xs text-slate-500">{r.school}</span>
-                            {r.performance && <span className="ml-auto text-xs font-semibold">{r.performance}</span>}
-                          </div>
-                        ))}
-                      </div>
-                    ))}
-                  </div>
                 </div>
-              ))}
-            </section>
-          </div>
+              </>
+            ) : (
+              <div className="space-y-4">
+                {selected && (
+                  <div className="max-w-xl">
+                    <ChampionCard category={selected} scores={scores} top={6} />
+                  </div>
+                )}
+                <section className="rounded-xl bg-white p-4 shadow-sm">
+                  <h2 className="text-lg font-bold">{selected ? `🏅 ${selected.name} — schools` : "🏆 Championship points"}</h2>
+                  <p className="mb-3 text-xs text-slate-500">
+                    {selected
+                      ? selected.counts_for_points
+                        ? "Points from this category only."
+                        : "Points from this category only — not added to the overall total."
+                      : excluded.length
+                        ? `All categories except ${excluded.map((c) => c.name).join(", ")}.`
+                        : "All categories added together."}
+                  </p>
+                  <StandingTable standings={standings} />
+                </section>
+                {resultsSection}
+              </div>
+            )}
+          </>
         )}
       </main>
     </div>
