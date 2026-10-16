@@ -34,7 +34,7 @@ function drawCertificate(doc: jsPDF, c: CertificateData, s: Settings | null) {
   const cx = W / 2;
 
   // Borders
-  doc.setFillColor(253, 251, 245);
+  doc.setFillColor(255, 255, 255);
   doc.rect(0, 0, W, H, "F");
   doc.setDrawColor(...NAVY);
   doc.setLineWidth(3);

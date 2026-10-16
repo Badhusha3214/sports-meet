@@ -47,6 +47,7 @@ export default function BibsPage() {
   const { data: athletes, loading, refresh } = useLive(loadAthletes, [] as Athlete[], ["athletes"]);
   const [start, setStart] = useState<string>("");
   const [order, setOrder] = useState("school");
+  const [block, setBlock] = useState<string | null>(null);
   const [schoolFilter, setSchoolFilter] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -69,10 +70,19 @@ export default function BibsPage() {
     await Promise.all([refresh(), reload()]);
   };
 
+  // Bibs per school: blank = numbered straight through. Defaults to the last used block, or 100.
+  const blockValue = block ?? String(settings?.bib_block ?? 100);
+
   const allocate = () => {
+    if (blockValue && !/^\d+$/.test(blockValue)) return toast.error("Bibs per school must be a whole number.");
     if (athletes.some((a) => a.bib) && !confirm("This renumbers ALL athletes. Continue?")) return;
     void run(
-      () => supabase().rpc("allocate_bibs", { p_order: order, p_start: Number(start || settings?.bib_start || 1001) }),
+      () =>
+        supabase().rpc("allocate_bibs", {
+          p_order: order,
+          p_start: Number(start || settings?.bib_start || 1001),
+          p_block: order === "school" && blockValue ? Number(blockValue) : null,
+        }),
       (n) => `${n} bib numbers allocated.`,
     );
   };
@@ -143,8 +153,12 @@ export default function BibsPage() {
           </div>
         ) : (
           <>
-            <Note>Finish registrations first, then allocate. Finalize before printing bib cards so numbers can&apos;t change by mistake.</Note>
-            <div className="grid items-end gap-3 sm:grid-cols-4">
+            <Note>
+              Finish registrations first, then allocate. Schools are numbered in the order listed (A–Z), each school in one run — e.g.
+              100 per school starting at 1: first school 1–100, next school 101–200. Finalize before printing bib cards so numbers
+              can&apos;t change by mistake.
+            </Note>
+            <div className="grid items-end gap-3 sm:grid-cols-5">
               <Field label="Starting bib">
                 <input
                   type="number"
@@ -162,6 +176,18 @@ export default function BibsPage() {
                   <option value="name">Athlete name</option>
                 </select>
               </Field>
+              {order === "school" && (
+                <Field label="Bibs per school (blank = no gaps)">
+                  <input
+                    type="number"
+                    min={1}
+                    className={inputCls}
+                    value={blockValue}
+                    placeholder="no gaps"
+                    onChange={(e) => setBlock(e.target.value)}
+                  />
+                </Field>
+              )}
               <Button onClick={allocate} disabled={busy || !athletes.length}>
                 Allocate all
               </Button>

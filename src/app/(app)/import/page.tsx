@@ -262,8 +262,9 @@ export default function ImportPage() {
       if (id && id > 0) idByRow.set(r.row, id);
     }
 
-    // 2) Relay teams. The database gives each new team the next free letter in its relay.
+    // 2) Relay teams. The database letters the teams of each relay A, B, C … in school order.
     const status: Record<string, { ok: boolean; text: string }> = {};
+    const createdTeam = new Map<string, number>(); // group key → new team id
     const [teams, members] = await Promise.all([loadRelayTeams(), loadRelayMembers()]);
     const teamOf = new Map<string, string>(); // `${eventId}|${athleteId}` → existing team letter
     for (const m of members) {
@@ -306,8 +307,14 @@ export default function ImportPage() {
         status[g.key] = { ok: false, text: errorMessage(res.error) };
       } else {
         ids.forEach((id) => teamOf.set(`${g.event.id}|${id}`, team.team_label));
-        status[g.key] = { ok: true, text: `Created as team ${team.team_label}` };
+        status[g.key] = { ok: true, text: "Created" };
+        createdTeam.set(g.key, team.id);
       }
+    }
+    // Letters follow school order, so a later team can shift earlier ones — read the final letters.
+    if (createdTeam.size) {
+      const final = new Map((await loadRelayTeams()).map((t) => [t.id, t.team_label]));
+      for (const [key, id] of createdTeam) status[key] = { ok: true, text: `Created as team ${final.get(id) ?? ""}` };
     }
 
     setRows((rs) => rs.map((r) => ({ ...r, ...(updated.get(r.row) ?? {}) })));

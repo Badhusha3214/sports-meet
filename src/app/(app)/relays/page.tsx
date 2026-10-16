@@ -49,11 +49,11 @@ export default function RelaysPage() {
       return toast.error(`Choose ${RELAY_MIN} to ${RELAY_MAX} runners.`);
     setSaving(true);
     const sb = supabase();
-    // The database gives the team the next free letter in this relay.
+    // The database letters the teams of a relay A, B, C … in school order.
     const { data: team, error } = await sb
       .from("relay_teams")
       .insert({ event_id: event.id, school_id: Number(schoolId) })
-      .select("id, team_label")
+      .select("id")
       .single();
     if (error) {
       setSaving(false);
@@ -64,7 +64,8 @@ export default function RelaysPage() {
       await sb.from("relay_teams").delete().eq("id", team.id);
       toast.error(res.error);
     } else {
-      toast.ok(`Team ${team.team_label} saved with ${picked.length} runners.`);
+      const { data: saved } = await sb.from("relay_teams").select("team_label").eq("id", team.id).single();
+      toast.ok(`Team ${saved?.team_label ?? ""} saved with ${picked.length} runners.`);
       setPicked([]);
     }
     setSaving(false);

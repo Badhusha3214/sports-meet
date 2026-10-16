@@ -20,6 +20,8 @@ export interface Settings {
   director_name: string;
   bib_start: number;
   bibs_finalized: boolean;
+  /** Bibs reserved per school (e.g. 100 → 1–100, 101–200 …); null when numbered straight through. */
+  bib_block?: number | null;
   points_first: number;
   points_second: number;
   points_third: number;
