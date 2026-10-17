@@ -25,7 +25,7 @@ export default function RelaysPage() {
   const athletes = useMemo(() => new Map(snap.athletes.map((a) => [a.id, a])), [snap.athletes]);
   const eventTeams = snap.teams
     .filter((t) => t.event_id === event?.id)
-    .sort((a, b) => a.team_label.length - b.team_label.length || a.team_label.localeCompare(b.team_label));
+    .sort((a, b) => a.team_label.localeCompare(b.team_label, undefined, { numeric: true }));
   const taken = new Set(snap.members.filter((m) => eventTeams.some((t) => t.id === m.team_id)).map((m) => m.athlete_id));
   const membersOf = (teamId: number) =>
     snap.members
